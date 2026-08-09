@@ -28,6 +28,7 @@ from jobspy.ziprecruiter import ZipRecruiter
 
 # Update the SCRAPER_MAPPING dictionary in the scrape_jobs function
 
+
 def scrape_jobs(
     site_name: str | list[str] | Site | list[Site] | None = None,
     search_term: str | None = None,
@@ -49,6 +50,7 @@ def scrape_jobs(
     enforce_annual_salary: bool = False,
     verbose: int = 0,
     user_agent: str = None,
+    serp_api_key: str | None = None,
     **kwargs,
 ) -> pd.DataFrame:
     """
@@ -103,7 +105,14 @@ def scrape_jobs(
 
     def scrape_site(site: Site) -> Tuple[str, JobResponse]:
         scraper_class = SCRAPER_MAPPING[site]
-        scraper = scraper_class(proxies=proxies, ca_cert=ca_cert, user_agent=user_agent)
+        scraper_arguments = {
+            "proxies": proxies,
+            "ca_cert": ca_cert,
+            "user_agent": user_agent,
+        }
+        if site is Site.GOOGLE:
+            scraper_arguments["serp_api_key"] = serp_api_key
+        scraper = scraper_class(**scraper_arguments)
         scraped_data: JobResponse = scraper.scrape(scraper_input)
         cap_name = site.value.capitalize()
         site_name = "ZipRecruiter" if cap_name == "Zip_recruiter" else cap_name
@@ -185,7 +194,7 @@ def scrape_jobs(
                 else None
             )
 
-            #naukri-specific fields
+            # naukri-specific fields
             job_data["skills"] = (
                 ", ".join(job_data["skills"]) if job_data["skills"] else None
             )

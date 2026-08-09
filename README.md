@@ -28,6 +28,7 @@ jobs = scrape_jobs(
     site_name=["indeed", "linkedin", "zip_recruiter", "google"], # "glassdoor", "bayt", "naukri", "bdjobs"
     search_term="software engineer",
     google_search_term="software engineer jobs near San Francisco, CA since yesterday",
+    # serp_api_key="...", # optional Google Jobs provider fallback; never commit this value
     location="San Francisco, CA",
     results_wanted=20,
     hours_old=72,
@@ -66,6 +67,10 @@ Optional
 |
 ├── google_search_term (str)
 |     search term for google jobs. This is the only param for filtering google jobs.
+│
+├── serp_api_key (str)
+|     optional SerpApi credential for Google Jobs. When supplied, JobSpy performs one
+|     bounded Google Jobs API request instead of the legacy non-JavaScript scraper.
 │
 ├── location (str)
 │
@@ -200,7 +205,10 @@ This searches the description/title and must include software, summer, 2025, one
 ---
 
 **Q: No results when using "google"?**  
-**A:** You have to use super specific syntax. Search for google jobs on your browser and then whatever pops up in the google jobs search box after applying some filters is what you need to copy & paste into the google_search_term. 
+**A:** Google's legacy non-JavaScript response may no longer contain job data. Supply a
+SerpApi credential with `serp_api_key` to use the bounded Google Jobs provider path.
+Keep the credential outside source control. Without a credential, JobSpy raises an
+explicit availability error when Google returns its JavaScript-only bootstrap page.
 
 ---
 
