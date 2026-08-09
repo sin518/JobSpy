@@ -55,7 +55,7 @@ class JSearchGoogleJobsClient:
                 "Google Jobs provider credentials are invalid."
             )
         self._api_key = api_key
-        self._session = session or create_session(is_tls=False, has_retry=True)
+        self._session = session or create_session(is_tls=False, has_retry=False)
 
     def scrape(self, scraper_input: ScraperInput) -> JobResponse:
         params: dict[str, object] = {

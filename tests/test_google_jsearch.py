@@ -40,6 +40,16 @@ def _query(**changes):
 
 
 class JSearchGoogleJobsClientTests(TestCase):
+    def test_disables_transport_retries_to_keep_quota_usage_bounded(self):
+        session = _FakeSession(_FakeResponse({"status": "OK", "data": {"jobs": []}}))
+
+        with patch(
+            "jobspy.google.jsearch.create_session", return_value=session
+        ) as factory:
+            JSearchGoogleJobsClient(api_key="test-secret").scrape(_query())
+
+        factory.assert_called_once_with(is_tls=False, has_retry=False)
+
     def test_maps_one_bounded_search_and_keeps_the_key_in_the_header(self):
         session = _FakeSession(
             _FakeResponse(
