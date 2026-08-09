@@ -51,6 +51,7 @@ def scrape_jobs(
     verbose: int = 0,
     user_agent: str = None,
     serp_api_key: str | None = None,
+    jsearch_api_key: str | None = None,
     **kwargs,
 ) -> pd.DataFrame:
     """
@@ -112,6 +113,7 @@ def scrape_jobs(
         }
         if site is Site.GOOGLE:
             scraper_arguments["serp_api_key"] = serp_api_key
+            scraper_arguments["jsearch_api_key"] = jsearch_api_key
         scraper = scraper_class(**scraper_arguments)
         scraped_data: JobResponse = scraper.scrape(scraper_input)
         cap_name = site.value.capitalize()

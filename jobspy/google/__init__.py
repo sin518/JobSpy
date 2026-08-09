@@ -19,6 +19,7 @@ from jobspy.model import (
 from jobspy.util import extract_emails_from_text, extract_job_type, create_session
 from jobspy.google.util import log, find_job_info_initial_page, find_job_info
 from jobspy.google.serpapi import SerpApiGoogleJobsClient
+from jobspy.google.jsearch import JSearchGoogleJobsClient
 
 
 class GoogleJobsUnavailableError(RuntimeError):
@@ -32,6 +33,7 @@ class Google(Scraper):
         ca_cert: str | None = None,
         user_agent: str | None = None,
         serp_api_key: str | None = None,
+        jsearch_api_key: str | None = None,
     ):
         """
         Initializes Google Scraper with the Goodle jobs search url
@@ -47,6 +49,7 @@ class Google(Scraper):
         self.url = "https://www.google.com/search"
         self.jobs_url = "https://www.google.com/async/callback:550"
         self.serp_api_key = serp_api_key
+        self.jsearch_api_key = jsearch_api_key
 
     def scrape(self, scraper_input: ScraperInput) -> JobResponse:
         """
@@ -57,6 +60,10 @@ class Google(Scraper):
         self.scraper_input = scraper_input
         self.scraper_input.results_wanted = min(900, scraper_input.results_wanted)
 
+        if self.jsearch_api_key is not None:
+            return JSearchGoogleJobsClient(api_key=self.jsearch_api_key).scrape(
+                scraper_input
+            )
         if self.serp_api_key is not None:
             return SerpApiGoogleJobsClient(api_key=self.serp_api_key).scrape(
                 scraper_input
