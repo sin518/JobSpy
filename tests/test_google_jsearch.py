@@ -1,10 +1,13 @@
 from datetime import date
+from hashlib import sha256
 from unittest import TestCase
 from unittest.mock import patch
 
 from jobspy import scrape_jobs
 from jobspy.google.jsearch import JSearchGoogleJobsClient, JSearchGoogleJobsError
 from jobspy.model import Country, JobResponse, ScraperInput, Site
+
+LONG_JOB_ID = "google-job-" + ("x" * 400)
 
 
 class _FakeResponse:
@@ -58,7 +61,7 @@ class JSearchGoogleJobsClientTests(TestCase):
                     "data": {
                         "jobs": [
                             {
-                                "job_id": "google-job-1",
+                                "job_id": LONG_JOB_ID,
                                 "job_title": "Full Stack Developer",
                                 "employer_name": "Example Pte Ltd",
                                 "employer_website": "https://example.test",
@@ -88,7 +91,11 @@ class JSearchGoogleJobsClientTests(TestCase):
 
         self.assertEqual(len(response.jobs), 1)
         job = response.jobs[0]
-        self.assertEqual(job.id, "go-google-job-1")
+        self.assertEqual(
+            job.id,
+            f"go-{sha256(LONG_JOB_ID.encode('utf-8')).hexdigest()}",
+        )
+        self.assertEqual(len(job.id), 67)
         self.assertEqual(job.title, "Full Stack Developer")
         self.assertEqual(job.company_name, "Example Pte Ltd")
         self.assertEqual(job.job_url, "https://jobs.example.test/full-stack-1")

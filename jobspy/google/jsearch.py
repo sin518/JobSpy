@@ -3,6 +3,7 @@ from __future__ import annotations
 import math
 from collections.abc import Mapping, Sequence
 from datetime import date, datetime
+from hashlib import sha256
 from typing import Protocol
 from urllib.parse import urlparse
 
@@ -164,7 +165,7 @@ def _job_post(raw_job: object) -> JobPost:
         raise JSearchGoogleJobsError("Google Jobs provider response was invalid.")
 
     return JobPost(
-        id=f"go-{_required_text(raw_job, 'job_id')}",
+        id=_source_job_id(raw_job),
         title=_required_text(raw_job, "job_title"),
         company_name=_required_text(raw_job, "employer_name"),
         company_url=company_url,
@@ -199,6 +200,11 @@ def _job_url(raw_job: Mapping[str, object]) -> str:
     if google_link is not None:
         return google_link
     raise JSearchGoogleJobsError("Google Jobs provider response was invalid.")
+
+
+def _source_job_id(raw_job: Mapping[str, object]) -> str:
+    raw_id = _required_text(raw_job, "job_id")
+    return f"go-{sha256(raw_id.encode('utf-8')).hexdigest()}"
 
 
 def _location(raw_job: Mapping[str, object]) -> Location | None:
