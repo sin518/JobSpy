@@ -1,6 +1,7 @@
 from __future__ import annotations
 
 import math
+import re
 from collections.abc import Mapping, Sequence
 from datetime import date, datetime
 from hashlib import sha256
@@ -20,6 +21,55 @@ from jobspy.model import (
 from jobspy.util import create_session, extract_emails_from_text, extract_job_type
 
 JSEARCH_GOOGLE_JOBS_URL = "https://api.openwebninja.com/jsearch/search-v2"
+_MAX_HIGHLIGHT_CATEGORIES = 16
+_MAX_HIGHLIGHTS_PER_CATEGORY = 32
+_MAX_HIGHLIGHT_LENGTH = 1_000
+_MAX_HIGHLIGHT_TOTAL_LENGTH = 8_000
+_MAX_SALARY_TEXT_LENGTH = 1_000
+_SALARY_AMOUNT = r"\d+(?:[,.]\d{3})*(?:\.\d+)?\s*[kK]?"
+_SALARY_RANGE = re.compile(
+    rf"(?:A\$|C\$|HK\$|S\$|US\$|\$|RM|AUD|CAD|CNY|EUR|GBP|HKD|INR|JPY|MYR|RMB|SGD|USD|€|£|¥)\s*"
+    rf"{_SALARY_AMOUNT}\s*(?:[-–—~]|to)\s*"
+    rf"(?:(?:A\$|C\$|HK\$|S\$|US\$|\$|RM|AUD|CAD|CNY|EUR|GBP|HKD|INR|JPY|MYR|RMB|SGD|USD|€|£|¥)\s*)?"
+    rf"{_SALARY_AMOUNT}",
+    re.IGNORECASE,
+)
+_BASE_PAY_CUE = re.compile(
+    r"salary|base\s+pay|pay\s+range|wage|per\s+(?:hour|day|week|month|year)|"
+    r"/\s*(?:hr|hour|day|week|month|year)|hourly|daily|weekly|monthly|annual|yearly",
+    re.IGNORECASE,
+)
+_NON_BASE_PAY_CUE = re.compile(
+    r"allowance|bonus|commission|equity|stock|funded|funding|raised|valuation|revenue|turnover",
+    re.IGNORECASE,
+)
+_COUNTRY_CURRENCIES = {
+    "AU": "AUD",
+    "CA": "CAD",
+    "CN": "CNY",
+    "GB": "GBP",
+    "HK": "HKD",
+    "IN": "INR",
+    "JP": "JPY",
+    "MY": "MYR",
+    "SG": "SGD",
+    "US": "USD",
+}
+_SUPPORTED_CURRENCIES = frozenset(_COUNTRY_CURRENCIES.values()) | {
+    "AUD",
+    "CAD",
+    "CNY",
+    "EUR",
+    "GBP",
+    "HKD",
+    "INR",
+    "JPY",
+    "KRW",
+    "MYR",
+    "RMB",
+    "SGD",
+    "USD",
+}
 
 
 class _Response(Protocol):
@@ -172,6 +222,7 @@ def _job_post(raw_job: object) -> JobPost:
         job_url=_job_url(raw_job),
         location=_location(raw_job),
         description=description,
+        salary_text=_salary_text(raw_job.get("job_highlights")),
         emails=extract_emails_from_text(description),
         job_type=extract_job_type((employment_type or "").replace("-", " ")),
         compensation=_compensation(raw_job),
@@ -230,13 +281,66 @@ def _compensation(raw_job: Mapping[str, object]) -> Compensation | None:
         "DAY": CompensationInterval.DAILY,
         "HOUR": CompensationInterval.HOURLY,
     }.get((_optional_text(raw_job.get("job_salary_period")) or "").upper())
-    currency = _optional_text(raw_job.get("job_salary_currency")) or "USD"
+    currency = _salary_currency(
+        raw_job.get("job_salary_currency"), raw_job.get("job_country")
+    )
     return Compensation(
         interval=interval,
         min_amount=minimum,
         max_amount=maximum,
         currency=currency,
     )
+
+
+def _salary_currency(value: object, country: object) -> str | None:
+    currency = _optional_text(value)
+    if currency is not None:
+        normalized = currency.upper()
+        if normalized not in _SUPPORTED_CURRENCIES:
+            return None
+        return normalized
+    country_code = _optional_text(country)
+    if country_code is None:
+        return None
+    return _COUNTRY_CURRENCIES.get(country_code.upper())
+
+
+def _salary_text(value: object) -> str | None:
+    if value is None:
+        return None
+    if not isinstance(value, Mapping) or len(value) > _MAX_HIGHLIGHT_CATEGORIES:
+        return None
+    total_length = 0
+    salary_candidates: list[str] = []
+    for category, highlights in value.items():
+        if not isinstance(category, str) or not category or len(category) > 100:
+            return None
+        if not isinstance(highlights, Sequence) or isinstance(highlights, str | bytes):
+            return None
+        if len(highlights) > _MAX_HIGHLIGHTS_PER_CATEGORY:
+            return None
+        for highlight in highlights:
+            if not isinstance(highlight, str):
+                return None
+            if (
+                not highlight
+                or "\x00" in highlight
+                or len(highlight) > _MAX_HIGHLIGHT_LENGTH
+            ):
+                return None
+            total_length += len(highlight)
+            if total_length > _MAX_HIGHLIGHT_TOTAL_LENGTH:
+                return None
+            normalized = " ".join(highlight.split())
+            if (
+                _SALARY_RANGE.search(normalized)
+                and _BASE_PAY_CUE.search(normalized)
+                and not _NON_BASE_PAY_CUE.search(normalized)
+            ):
+                salary_candidates.append(normalized)
+    if len(salary_candidates) != 1:
+        return None
+    return salary_candidates[0][:_MAX_SALARY_TEXT_LENGTH]
 
 
 def _posted_date(value: object) -> date | None:

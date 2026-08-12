@@ -345,6 +345,7 @@ desired_order = [
     "listing_type",
     "emails",
     "description",
+    "salary_text",
     "company_industry",
     "company_url",
     "company_logo",

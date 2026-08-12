@@ -236,6 +236,7 @@ class DescriptionFormat(Enum):
     HTML = "html"
     PLAIN = "plain"
 
+
 class JobPost(BaseModel):
     id: str | None = None
     title: str
@@ -245,6 +246,7 @@ class JobPost(BaseModel):
     location: Optional[Location]
 
     description: str | None = None
+    salary_text: str | None = None
     company_url: str | None = None
     company_url_direct: str | None = None
 
@@ -279,6 +281,7 @@ class JobPost(BaseModel):
     company_reviews_count: int | None = None  #from ambitionBoxData.ReviewsCount
     vacancy_count: int | None = None  #from vacancy
     work_from_home_type: str | None = None  #from clusters.wfhType (e.g., "Hybrid", "Remote")
+
 
 class JobResponse(BaseModel):
     jobs: list[JobPost] = []

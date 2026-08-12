@@ -5,7 +5,7 @@ from unittest.mock import patch
 
 from jobspy import scrape_jobs
 from jobspy.google.jsearch import JSearchGoogleJobsClient, JSearchGoogleJobsError
-from jobspy.model import Country, JobResponse, ScraperInput, Site
+from jobspy.model import Country, JobPost, JobResponse, Location, ScraperInput, Site
 
 LONG_JOB_ID = "google-job-" + ("x" * 400)
 
@@ -40,6 +40,32 @@ def _query(**changes):
     }
     values.update(changes)
     return ScraperInput(**values)
+
+
+def _raw_job(**changes):
+    values = {
+        "job_id": "google-job-1",
+        "job_title": "Full Stack Developer",
+        "employer_name": "Example Pte Ltd",
+        "job_publisher": "JobStreet",
+        "job_employment_type": "Full-time",
+        "job_apply_link": "https://jobs.example.test/full-stack-1",
+        "job_description": "Build customer-facing products.",
+        "job_is_remote": False,
+        "job_posted_at_datetime_utc": "2026-08-07T12:30:00.000Z",
+        "job_location": "Singapore",
+        "job_city": "Singapore",
+        "job_country": "SG",
+    }
+    values.update(changes)
+    return values
+
+
+def _client_for(raw_job):
+    payload = {"status": "OK", "data": {"jobs": [raw_job]}}
+    return JSearchGoogleJobsClient(
+        api_key="test-secret", session=_FakeSession(_FakeResponse(payload))
+    )
 
 
 class JSearchGoogleJobsClientTests(TestCase):
@@ -124,6 +150,101 @@ class JSearchGoogleJobsClientTests(TestCase):
         self.assertNotIn("api_key", params)
         self.assertEqual(timeout, 60)
 
+    def test_structured_compensation_prefers_an_explicit_valid_currency(self):
+        client = _client_for(
+            _raw_job(
+                job_min_salary=4700,
+                job_max_salary=6000,
+                job_salary_period="MONTH",
+                job_salary_currency="EUR",
+            )
+        )
+
+        job = client.scrape(_query()).jobs[0]
+
+        self.assertEqual(job.compensation.currency, "EUR")
+
+    def test_structured_compensation_uses_an_exact_country_currency_when_missing(self):
+        client = _client_for(
+            _raw_job(
+                job_min_salary=4700,
+                job_max_salary=6000,
+                job_salary_period="MONTH",
+                job_salary_currency=None,
+                job_country="SG",
+            )
+        )
+
+        job = client.scrape(_query()).jobs[0]
+
+        self.assertEqual(job.compensation.currency, "SGD")
+
+    def test_structured_compensation_does_not_invent_currency_for_unknown_country(self):
+        client = _client_for(
+            _raw_job(
+                job_min_salary=4700,
+                job_max_salary=6000,
+                job_salary_period="MONTH",
+                job_salary_currency=None,
+                job_country="ZZ",
+            )
+        )
+
+        job = client.scrape(_query()).jobs[0]
+
+        self.assertIsNone(job.compensation.currency)
+
+    def test_keeps_highlight_salary_separate_from_the_job_description(self):
+        description = "Build customer-facing products."
+        client = _client_for(
+            _raw_job(
+                job_description=description,
+                job_highlights={
+                    "Benefits": [
+                        "$4,700 - $6,000 per month",
+                        "Medical and dental insurance",
+                    ]
+                },
+            )
+        )
+
+        job = client.scrape(_query()).jobs[0]
+
+        self.assertEqual(job.salary_text, "$4,700 - $6,000 per month")
+        self.assertEqual(job.description, description)
+        self.assertNotIn(job.salary_text, job.description)
+
+    def test_ignores_non_base_pay_financial_highlights(self):
+        candidates = (
+            "Transport allowance: S$500 per month",
+            "Annual performance bonus up to S$10,000",
+            "Raised $286M in funding",
+        )
+        for candidate in candidates:
+            with self.subTest(candidate=candidate):
+                client = _client_for(_raw_job(job_highlights={"Benefits": [candidate]}))
+
+                job = client.scrape(_query()).jobs[0]
+
+                self.assertIsNone(job.salary_text)
+
+    def test_ignores_malformed_or_oversized_highlights_without_leaking_payloads(self):
+        secret = "do-not-echo-highlight-payload"
+        malformed_values = (
+            [secret],
+            {"Benefits": secret},
+            {"Benefits": [secret + ("x" * 5000)]},
+            {secret + ("x" * 100): ["$4,700 - $6,000 per month"]},
+            {"Benefits": ["$4,700 - $6,000 per month\x00" + secret]},
+        )
+        for highlights in malformed_values:
+            with self.subTest(highlights_type=type(highlights).__name__):
+                client = _client_for(_raw_job(job_highlights=highlights))
+
+                job = client.scrape(_query()).jobs[0]
+
+                self.assertIsNone(job.salary_text)
+
     def test_maps_date_ranges_to_the_supported_jsearch_values(self):
         cases = (
             (None, "all"),
@@ -192,3 +313,35 @@ class ScrapeJobsJSearchProviderTests(TestCase):
 
         self.assertEqual(constructor_arguments[0]["jsearch_api_key"], "test-secret")
         self.assertEqual(scraper_inputs[0].country, Country.SINGAPORE)
+
+    def test_exposes_salary_text_as_an_optional_dataframe_column(self):
+        class _FakeGoogle:
+            def __init__(self, **kwargs):
+                pass
+
+            def scrape(self, scraper_input):
+                return JobResponse(
+                    jobs=[
+                        JobPost(
+                            id="google-job-1",
+                            title="Full Stack Developer",
+                            company_name="Example Pte Ltd",
+                            job_url="https://jobs.example.test/full-stack-1",
+                            location=Location(city="Singapore", country="SG"),
+                            description="Build customer-facing products.",
+                            salary_text="$4,700 - $6,000 per month",
+                        )
+                    ]
+                )
+
+        with patch("jobspy.Google", _FakeGoogle):
+            jobs = scrape_jobs(
+                site_name="google",
+                search_term="Full Stack Developer",
+                country_indeed="singapore",
+                jsearch_api_key="test-secret",
+            )
+
+        self.assertIn("salary_text", jobs.columns)
+        self.assertEqual(jobs.iloc[0]["salary_text"], "$4,700 - $6,000 per month")
+        self.assertEqual(jobs.iloc[0]["description"], "Build customer-facing products.")
